@@ -330,3 +330,19 @@ func (suite *IBCTestUtilSuite) newTestChainWithSingleValidator(t *testing.T, coo
 
 	return chain
 }
+
+// SimulateGracePeriod simulates the waiting period necessary for the rollapp's state finalization.
+// This doesn't actually wait in real-time but simulates the condition being met or the time passing.
+func (suite *DelayedAckTestSuite) SimulateGracePeriod(blockNo int64) {
+
+	currentHeight := suite.rollappChain.GetContext().BlockHeight()
+	targetHeight := currentHeight + blockNo
+
+	for suite.rollappChain.GetContext().BlockHeight() < targetHeight {
+		_, err := suite.FinalizeRollappState(1, uint64(suite.rollappChain.GetContext().BlockHeight()))
+		if err != nil {
+			suite.T().Fatal("Failed to finalize rollapp state: ", err)
+		}
+		suite.rollappChain.NextBlock()
+	}
+}

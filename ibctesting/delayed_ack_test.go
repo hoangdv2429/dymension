@@ -172,6 +172,58 @@ func (suite *DelayedAckTestSuite) TestTransferRollappToHubFinalization() {
 	suite.Require().True(found)
 }
 
+// TestTransferHubToRollappAfterGracePeriodAckApplied tests the scenario where a packet is sent from the hub to rollapp successfully.
+// Checking after grace period ack gets applied on the hub the rollapp state is finalized.
+func (suite *DelayedAckTestSuite) TestTransferHubToRollappAfterGracePeriodAckApplied() {
+	path := suite.NewTransferPath(suite.hubChain, suite.rollappChain)
+	suite.coordinator.Setup(path)
+
+	hubEndpoint := path.EndpointA
+	hubIBCKeeper := suite.hubChain.App.GetIBCKeeper()
+	rollappEndpoint := path.EndpointB
+
+	suite.CreateRollapp()
+	suite.RegisterSequencer()
+	suite.GenesisEvent(path.EndpointA.ChannelID)
+	suite.UpdateRollappState(uint64(suite.rollappChain.GetContext().BlockHeight()))
+
+	timeoutHeight := clienttypes.NewHeight(100, 110)
+	amount, ok := sdk.NewIntFromString("1000000000000000000") // 1DYM
+	suite.Require().True(ok)
+	coinToSendToB := sdk.NewCoin(sdk.DefaultBondDenom, amount)
+
+	senderAccount := hubEndpoint.Chain.SenderAccount.GetAddress()
+	receiverAccount := rollappEndpoint.Chain.SenderAccount.GetAddress()
+
+	bankKeeper := ConvertToApp(suite.hubChain).BankKeeper
+	preSendBalance := bankKeeper.GetBalance(suite.hubChain.GetContext(), senderAccount, sdk.DefaultBondDenom)
+
+	msg := types.NewMsgTransfer(hubEndpoint.ChannelConfig.PortID, hubEndpoint.ChannelID, coinToSendToB, senderAccount.String(), receiverAccount.String(), timeoutHeight, disabledTimeoutTimestamp, "")
+	res, err := hubEndpoint.Chain.SendMsgs(msg)
+	suite.Require().NoError(err)
+	packet, err := ibctesting.ParsePacketFromEvents(res.GetEvents())
+	suite.Require().NoError(err)
+
+	err = path.RelayPacket(packet)
+	suite.Require().NoError(err)
+
+	postSendBalance := bankKeeper.GetBalance(suite.hubChain.GetContext(), senderAccount, sdk.DefaultBondDenom)
+	suite.Require().Equal(preSendBalance.Amount.Sub(coinToSendToB.Amount), postSendBalance.Amount)
+
+	// Wait for the grace period to simulate the delay for rollapp state finalization
+	suite.SimulateGracePeriod(10)
+
+	found := hubIBCKeeper.ChannelKeeper.HasPacketAcknowledgement(hubEndpoint.Chain.GetContext(), packet.GetDestPort(), packet.GetDestChannel(), packet.GetSequence())
+	suite.Require().False(found, "Ack should not be found before state finalization")
+
+	currentRollappBlockHeight := uint64(suite.rollappChain.GetContext().BlockHeight())
+	_, err = suite.FinalizeRollappState(1, currentRollappBlockHeight)
+	suite.Require().NoError(err)
+
+	found = hubIBCKeeper.ChannelKeeper.HasPacketAcknowledgement(hubEndpoint.Chain.GetContext(), packet.GetDestPort(), packet.GetDestChannel(), packet.GetSequence())
+	suite.Require().True(found, "Ack should be found after state finalization")
+}
+
 // TestHubToRollappTimeout tests the scenario where a packet is sent from the hub to the rollapp and the rollapp times out the packet.
 // The packet should actually get timed out and funds returned to the user only after the rollapp state is finalized.
 func (suite *DelayedAckTestSuite) TestHubToRollappTimeout() {
