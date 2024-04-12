@@ -179,8 +179,9 @@ func (suite *DelayedAckTestSuite) TestTransferHubToRollappAfterGracePeriodAckApp
 	suite.coordinator.Setup(path)
 
 	hubEndpoint := path.EndpointA
-	hubIBCKeeper := suite.hubChain.App.GetIBCKeeper()
+	// hubIBCKeeper := suite.hubChain.App.GetIBCKeeper()
 	rollappEndpoint := path.EndpointB
+	rollappIBCKeeper := suite.rollappChain.App.GetIBCKeeper()
 
 	suite.CreateRollapp()
 	suite.RegisterSequencer()
@@ -213,14 +214,14 @@ func (suite *DelayedAckTestSuite) TestTransferHubToRollappAfterGracePeriodAckApp
 	// Wait for the grace period to simulate the delay for rollapp state finalization
 	suite.SimulateGracePeriod(10)
 
-	found := hubIBCKeeper.ChannelKeeper.HasPacketAcknowledgement(hubEndpoint.Chain.GetContext(), packet.GetDestPort(), packet.GetDestChannel(), packet.GetSequence())
+	found := rollappIBCKeeper.ChannelKeeper.HasPacketAcknowledgement(hubEndpoint.Chain.GetContext(), packet.GetDestPort(), packet.GetDestChannel(), packet.GetSequence())
 	suite.Require().False(found, "Ack should not be found before state finalization")
 
 	currentRollappBlockHeight := uint64(suite.rollappChain.GetContext().BlockHeight())
 	_, err = suite.FinalizeRollappState(1, currentRollappBlockHeight)
 	suite.Require().NoError(err)
 
-	found = hubIBCKeeper.ChannelKeeper.HasPacketAcknowledgement(hubEndpoint.Chain.GetContext(), packet.GetDestPort(), packet.GetDestChannel(), packet.GetSequence())
+	found = rollappIBCKeeper.ChannelKeeper.HasPacketAcknowledgement(hubEndpoint.Chain.GetContext(), packet.GetDestPort(), packet.GetDestChannel(), packet.GetSequence())
 	suite.Require().True(found, "Ack should be found after state finalization")
 }
 
