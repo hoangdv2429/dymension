@@ -222,3 +222,46 @@ func (suite *DelayedAckTestSuite) TestHubToRollappTimeout() {
 	postFinalizeBalance := bankKeeper.GetBalance(suite.hubChain.GetContext(), senderAccount, sdk.DefaultBondDenom)
 	suite.Require().Equal(preSendBalance.Amount, postFinalizeBalance.Amount)
 }
+
+func (suite *DelayedAckTestSuite) TestTransferHubToRollappAfterGracePeriodAckApplied() {
+	path := suite.NewTransferPath(suite.hubChain, suite.rollappChain)
+	suite.coordinator.Setup(path)
+
+	hubEndpoint := path.EndpointA
+	rollappEndpoint := path.EndpointB
+	rollappIBCKeeper := suite.rollappChain.App.GetIBCKeeper()
+
+	suite.CreateRollapp()
+	suite.RegisterSequencer()
+	suite.UpdateRollappState(uint64(suite.rollappChain.GetContext().BlockHeight()))
+
+	bankKeeper := ConvertToApp(suite.hubChain).BankKeeper
+
+	timeoutHeight := clienttypes.NewHeight(100, 110)
+	amount, ok := sdk.NewIntFromString("1000000000000000000") // 1DYM
+	suite.Require().True(ok)
+	coinToSendToB := sdk.NewCoin(sdk.DefaultBondDenom, amount)
+
+	senderAccount := hubEndpoint.Chain.SenderAccount.GetAddress()
+	receiverAccount := rollappEndpoint.Chain.SenderAccount.GetAddress()
+
+	preSendBalance := bankKeeper.GetBalance(suite.hubChain.GetContext(), senderAccount, sdk.DefaultBondDenom)
+
+	msg := types.NewMsgTransfer(hubEndpoint.ChannelConfig.PortID, hubEndpoint.ChannelID, coinToSendToB, senderAccount.String(), receiverAccount.String(), timeoutHeight, disabledTimeoutTimestamp, "")
+	res, err := hubEndpoint.Chain.SendMsgs(msg)
+	suite.Require().NoError(err)
+	packet, err := ibctesting.ParsePacketFromEvents(res.GetEvents())
+	suite.Require().NoError(err)
+
+	err = path.RelayPacket(packet)
+	suite.Require().NoError(err)
+
+	postSendBalance := bankKeeper.GetBalance(suite.hubChain.GetContext(), senderAccount, sdk.DefaultBondDenom)
+	suite.Require().Equal(preSendBalance.Amount.Sub(coinToSendToB.Amount), postSendBalance.Amount)
+
+	// Wait for the grace period to simulate the delay for state finalization
+	suite.SimulateGracePeriod()
+
+	found := rollappIBCKeeper.ChannelKeeper.HasPacketAcknowledgement(hubEndpoint.Chain.GetContext(), packet.GetDestPort(), packet.GetDestChannel(), packet.GetSequence())
+	suite.Require().True(found, "Acknowledgement should be found after state finalization")
+}

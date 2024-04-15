@@ -267,7 +267,6 @@ func (suite *IBCTestUtilSuite) newTestChainWithSingleValidator(t *testing.T, coo
 	senderAccs := []ibctesting.SenderAccount{}
 
 	// generate genesis accounts
-
 	valPrivKey := mock.NewPV()
 	valPubKey, err := valPrivKey.GetPubKey()
 	suite.Require().NoError(err)
@@ -334,4 +333,15 @@ func (suite *IBCTestUtilSuite) newTestChainWithSingleValidator(t *testing.T, coo
 	coord.CommitBlock(chain)
 
 	return chain
+}
+
+// SimulateGracePeriod simulates the waiting period necessary for the rollapp's state finalization.
+// This doesn't actually wait in real-time but simulates the condition being met or the time passing.
+func (suite *DelayedAckTestSuite) SimulateGracePeriod() {
+	currentHeight := suite.rollappChain.GetContext().BlockHeight()
+	targetHeight := currentHeight + 10 // Simulating a grace period of 10 blocks
+
+	for suite.rollappChain.GetContext().BlockHeight() < targetHeight {
+		suite.rollappChain.NextBlock() // This is a conceptual method to advance the block height in your test chain.
+	}
 }
